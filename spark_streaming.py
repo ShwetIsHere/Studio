@@ -53,17 +53,26 @@ if not os.path.exists(ALERTS_DIR):
 
 # 3. Create a Streaming DataFrame by reading JSON files
 print(f"Monitoring directory: {ALERTS_DIR} for new alerts...")
-alerts_df = spark.readStream \
+raw_alerts_df = spark.readStream \
     .schema(alert_schema) \
     .json(ALERTS_DIR)
 
-# 4. Define Function to write each batch to MySQL
+# 4. Filter the data: confidence > 0.5 and (event_type IS 'fire' OR 'Weapon')
+# We use lower() to handle case sensitivity safely
+from pyspark.sql.functions import lower, col
+
+filtered_alerts_df = raw_alerts_df.filter(
+    (col("confidence") > 0.5) & 
+    (lower(col("event_type")).isin("fire", "weapon"))
+)
+
+# 5. Define Function to write each batch to MySQL
 def write_to_mysql(batch_df, batch_id):
     """
-    Writes the micro-batch DataFrame to MySQL using JDBC.
+    Writes the filtered micro-batch DataFrame to MySQL using JDBC.
     """
     if batch_df.count() > 0:
-        print(f"Processing Batch ID: {batch_id} | Records: {batch_df.count()}")
+        print(f"PROCESSED THREAT: Batch ID {batch_id} | Saved {batch_df.count()} alerts to Database.")
         batch_df.write \
             .format("jdbc") \
             .option("url", MYSQL_DB_URL) \
@@ -73,10 +82,12 @@ def write_to_mysql(batch_df, batch_id):
             .option("password", MYSQL_PASSWORD) \
             .mode("append") \
             .save()
-        print(f"Batch {batch_id} saved to MySQL successfully.")
+    else:
+        # This will show up if logs are received but they don't meet the confidence/type criteria
+        pass
 
-# 5. Start the Streaming Query
-query = alerts_df.writeStream \
+# 6. Start the Streaming Query
+query = filtered_alerts_df.writeStream \
     .foreachBatch(write_to_mysql) \
     .option("checkpointLocation", CHECKPOINT_DIR) \
     .start()
