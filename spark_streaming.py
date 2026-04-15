@@ -1,7 +1,28 @@
-from pyspark.sql import SparkSession
-from pyspark.sql.types import StructType, StructField, StringType, LongType, FloatType
 import os
 import sys
+
+# Force a Spark-compatible JDK on this machine before importing PySpark.
+JAVA_17_CANDIDATES = [
+    r"C:\jdk-17.0.0.1",
+    r"C:\Users\shwet\AppData\Roaming\Code\User\globalStorage\pleiades.java-extension-pack-jdk\java\17",
+]
+
+java_home = None
+for candidate in JAVA_17_CANDIDATES:
+    if os.path.exists(os.path.join(candidate, "bin", "java.exe")):
+        java_home = candidate
+        break
+
+if java_home:
+    java_bin = os.path.join(java_home, "bin")
+    os.environ["JAVA_HOME"] = java_home
+    os.environ["PATH"] = java_bin + os.pathsep + os.environ["PATH"]
+    print(f"Using JAVA_HOME for Spark: {java_home}")
+else:
+    print("WARNING: Java 17 not found in expected paths. Spark may fail with newer Java versions.")
+
+from pyspark.sql import SparkSession
+from pyspark.sql.types import StructType, StructField, StringType, LongType, FloatType
 
 # --- WINDOWS SPARK FIX ---
 # Spark on Windows requires 'winutils.exe' in a 'bin' folder under HADOOP_HOME.
