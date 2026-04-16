@@ -27,15 +27,17 @@ def main():
 
     args = parse_args()
 
-    # Directory Setup for Spark Pipeline
-    LOG_DIR = "alerts/logs/"
-    FRAME_DIR = "alerts/frames/"
+    # Project structure setup
+    SCRIPT_DIR = Path(__file__).resolve().parent
+    # If script is in 'scripts' folder, project root is one level up
+    PROJECT_ROOT = SCRIPT_DIR.parent if SCRIPT_DIR.name == "scripts" else SCRIPT_DIR
+    
+    LOG_DIR = str(PROJECT_ROOT / "alerts" / "logs")
+    FRAME_DIR = str(PROJECT_ROOT / "alerts" / "frames")
     os.makedirs(LOG_DIR, exist_ok=True)
     os.makedirs(FRAME_DIR, exist_ok=True)
-
-    # Paths as requested by user
-    FIRE_MODEL_PATH = r"runs\train\fire_yolo11\weights\fire_best.pt"
-    WEAPON_MODEL_PATH = r"runs\train\fire_yolo11\weights\weapon_best.pt"
+    FIRE_MODEL_PATH = str(PROJECT_ROOT / "models" / "runs" / "train" / "fire_yolo11" / "weights" / "fire_best.pt")
+    WEAPON_MODEL_PATH = str(PROJECT_ROOT / "models" / "runs" / "train" / "fire_yolo11" / "weights" / "weapon_best.pt")
 
     # Load models
     print(f"Loading fire model from: {FIRE_MODEL_PATH}")
@@ -55,9 +57,11 @@ def main():
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     fps = cap.get(cv2.CAP_PROP_FPS)
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    out = cv2.VideoWriter(args.output, fourcc, fps, (width, height))
+    output_path = str(PROJECT_ROOT / "output" / args.output)
+    out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
 
     print(f"Processing video: {args.source}")
+    print(f"Saving output to: {output_path}")
     print(f"Saving alerts to: {LOG_DIR}")
     
     frame_count = 0
@@ -103,13 +107,14 @@ def main():
                         "camera_id": "CAM_01"
                     }
 
-                    # 3. Save JSON log file
-                    log_filename = f"alert_{current_time}_{frame_count}_{cls_name}.json"
-                    with open(os.path.join(LOG_DIR, log_filename), 'w') as f:
-                        json.dump(alert_data, f)
-                    
-                    # 4. Save the detection frame
+                    # 4. Save the detection frame locally
                     cv2.imwrite(frame_path, annotated_frame)
+                    
+                    # 5. Save JSON log file locally
+                    log_filename = f"alert_{current_time}_{frame_count}_{cls_name}.json"
+                    log_path = os.path.join(LOG_DIR, log_filename)
+                    with open(log_path, 'w') as f:
+                        json.dump(alert_data, f)
 
         # Write output video
         out.write(annotated_frame)

@@ -23,37 +23,35 @@ else:
 
 from pyspark.sql import SparkSession
 from pyspark.sql.types import StructType, StructField, StringType, LongType, FloatType
+from pyspark.sql.functions import lower, col
+from pathlib import Path
+
+# --- PROJECT STRUCTURE SETUP ---
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parent if SCRIPT_DIR.name == "scripts" else SCRIPT_DIR
 
 # --- WINDOWS SPARK FIX ---
-# Spark on Windows requires 'winutils.exe' in a 'bin' folder under HADOOP_HOME.
-# 1. Create a folder named 'hadoop' in this project directory.
-# 2. Inside 'hadoop', create a folder named 'bin'.
-# 3. Download 'winutils.exe' from https://github.com/cdarlint/winutils/blob/master/hadoop-3.2.2/bin/winutils.exe
-# 4. Place 'winutils.exe' inside the 'hadoop/bin' folder.
-# The following code automatically tells Spark where to find it:
-hadoop_home = os.path.abspath("hadoop")
+hadoop_home = str(PROJECT_ROOT / "hadoop")
 hadoop_bin = os.path.join(hadoop_home, "bin")
-
 os.environ['HADOOP_HOME'] = hadoop_home
 os.environ['PATH'] = hadoop_bin + os.pathsep + os.environ['PATH']
 sys.path.append(hadoop_bin)
 # --------------------------
 
-# --- MYSQL CONFIGURATION ---
-MYSQL_USER = "root"
-MYSQL_PASSWORD = "shwet"  # Replace with your actual password
-MYSQL_DB_URL = "jdbc:mysql://localhost:3306/cctv"
-MYSQL_TABLE = "threat_alerts"
-# ---------------------------
+# --- MONGODB CONFIGURATION ---
+MONGO_URI = "mongodb://localhost:27017"
+MONGO_DB = "cctv"
+MONGO_COLLECTION = "threat_alerts"
+# -----------------------------
 
 # Path to monitor for incoming JSON alert files
-ALERTS_DIR = "alerts/logs/"
-CHECKPOINT_DIR = "alerts/checkpoints/"
+ALERTS_DIR = str(PROJECT_ROOT / "alerts" / "logs")
+CHECKPOINT_DIR = str(PROJECT_ROOT / "alerts" / "mongo_checkpoints")
 
-# 1. Initialize Spark Session with MySQL JDBC Connector
+# 1. Initialize Spark Session with MongoDB Connector
 spark = SparkSession.builder \
-    .appName("CCTV_Security_Streaming") \
-    .config("spark.jars.packages", "mysql:mysql-connector-java:8.0.33") \
+    .appName("CCTV_Security_Mongo_Streaming") \
+    .config("spark.jars.packages", "org.mongodb.spark:mongo-spark-connector_2.13:11.0.0") \
     .getOrCreate()
 
 spark.sparkContext.setLogLevel("ERROR")
@@ -67,10 +65,11 @@ alert_schema = StructType([
     StructField("camera_id", StringType(), True)
 ])
 
-# Ensure the alerts directory exists
+# Ensure the directories exist locally
 if not os.path.exists(ALERTS_DIR):
     os.makedirs(ALERTS_DIR)
-    print(f"Created directory: {ALERTS_DIR}")
+if not os.path.exists(CHECKPOINT_DIR):
+    os.makedirs(CHECKPOINT_DIR)
 
 # 3. Create a Streaming DataFrame by reading JSON files
 print(f"Monitoring directory: {ALERTS_DIR} for new alerts...")
@@ -78,40 +77,35 @@ raw_alerts_df = spark.readStream \
     .schema(alert_schema) \
     .json(ALERTS_DIR)
 
-# 4. Filter the data: confidence > 0.5 and (event_type IS 'fire' OR 'Weapon')
-# We use lower() to handle case sensitivity safely
-from pyspark.sql.functions import lower, col
-
+# 4. Filter the data: confidence > 0.5 and (event_type IS 'fire' OR 'weapon')
 filtered_alerts_df = raw_alerts_df.filter(
     (col("confidence") > 0.5) & 
     (lower(col("event_type")).isin("fire", "weapon"))
 )
 
-# 5. Define Function to write each batch to MySQL
-def write_to_mysql(batch_df, batch_id):
+# 5. Define Function to write each batch to MongoDB
+def write_to_mongodb(batch_df, batch_id):
     """
-    Writes the filtered micro-batch DataFrame to MySQL using JDBC.
+    Writes the filtered micro-batch DataFrame to MongoDB.
     """
     if batch_df.count() > 0:
         print(f"PROCESSED THREAT: Batch ID {batch_id} | Saved {batch_df.count()} alerts to Database.")
         batch_df.write \
-            .format("jdbc") \
-            .option("url", MYSQL_DB_URL) \
-            .option("driver", "com.mysql.cj.jdbc.Driver") \
-            .option("dbtable", MYSQL_TABLE) \
-            .option("user", MYSQL_USER) \
-            .option("password", MYSQL_PASSWORD) \
+            .format("mongodb") \
+            .option("connection.uri", MONGO_URI) \
+            .option("database", MONGO_DB) \
+            .option("collection", MONGO_COLLECTION) \
             .mode("append") \
             .save()
     else:
-        # This will show up if logs are received but they don't meet the confidence/type criteria
+        # No data in this batch after filtering
         pass
 
 # 6. Start the Streaming Query
 query = filtered_alerts_df.writeStream \
-    .foreachBatch(write_to_mysql) \
+    .foreachBatch(write_to_mongodb) \
     .option("checkpointLocation", CHECKPOINT_DIR) \
     .start()
 
-print("Streaming started. Waiting for logs...")
+print("MongoDB Streaming started. Waiting for logs...")
 query.awaitTermination()

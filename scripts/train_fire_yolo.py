@@ -3,18 +3,22 @@ import tempfile
 from pathlib import Path
 
 
+# Project structure setup
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parent if SCRIPT_DIR.name == "scripts" else SCRIPT_DIR
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train fire detection model with GPU on YOLO dataset")
     parser.add_argument(
         "--data",
         type=str,
-        default="Fire Detection.v1i.yolov11/data.yaml",
+        default=str(PROJECT_ROOT / "datasets" / "Fire Detection.v1i.yolov11" / "data.yaml"),
         help="Path to data.yaml",
     )
     parser.add_argument(
         "--model",
         type=str,
-        default="yolo11n.pt",
+        default=str(PROJECT_ROOT / "models" / "yolo11n.pt"),
         help="Base YOLO model checkpoint",
     )
     parser.add_argument("--epochs", type=int, default=40, help="Number of training epochs")
@@ -29,7 +33,7 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--workers", type=int, default=8, help="Data loader workers")
-    parser.add_argument("--project", type=str, default="runs/train", help="Output directory")
+    parser.add_argument("--project", type=str, default=str(PROJECT_ROOT / "runs" / "train"), help="Output directory")
     parser.add_argument("--name", type=str, default="fire_yolo11", help="Run name")
     return parser.parse_args()
 
