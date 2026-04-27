@@ -24,7 +24,7 @@ from ultralytics import YOLO
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Process 2+ video files in parallel via Kafka and detect fire + weapon."
+        description="Process videos via Kafka/local transport and detect fire + weapon."
     )
     parser.add_argument(
         "--videos",
@@ -334,7 +334,7 @@ def process_frame(
         ts = int(time.time() * 1000)
         frame_name = f"{video_id}_{ts}_{frame_index}.jpg"
         frame_path = frames_dir / frame_name
-        cv2.imwrite(str(frame_path), annotated)
+        # cv2.imwrite(str(frame_path), annotated)
 
         for cls_name, conf in detections:
             event_counter[cls_name] = event_counter.get(cls_name, 0) + 1
@@ -348,8 +348,15 @@ def process_frame(
                 "camera_id": video_id,
                 "source": "kafka_video_file" if args.transport in ("kafka", "auto") else "local_video_file",
             }
-            with open(log_path, "w", encoding="utf-8") as f:
-                json.dump(payload, f)
+            # with open(log_path, "w", encoding="utf-8") as f:
+            #     json.dump(payload, f)
+
+    # Resize the image significantly to reduce base64 size for fast IPC and fast UI loading
+    small_frame = cv2.resize(annotated, (480, 270))
+    ok_enc, encoded = cv2.imencode(".jpg", small_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 50])
+    if ok_enc:
+        b64 = base64.b64encode(encoded.tobytes()).decode("ascii")
+        print(f"FRAME_B64:{video_id}:{b64}", flush=True)
 
     if args.save_annotated:
         out_path = out_dir / f"{video_id}_{frame_index}.jpg"
@@ -554,14 +561,14 @@ def run_local_pipeline(
     frames_dir: Path,
     out_dir: Path,
 ) -> None:
-    frame_queue: queue.Queue = queue.Queue(maxsize=200)
+    frame_queues = [queue.Queue(maxsize=10) for _ in args.videos]
 
     producers = []
-    for i, video_path in enumerate(args.videos, start=1):
-        video_id = f"video_{i}"
+    for i, video_path in enumerate(args.videos):
+        video_id = f"video_{i + 1}"
         t = threading.Thread(
             target=local_producer_worker,
-            args=(frame_queue, video_path, video_id, args.frame_step),
+            args=(frame_queues[i], video_path, video_id, args.frame_step),
             daemon=True,
         )
         producers.append(t)
@@ -579,60 +586,70 @@ def run_local_pipeline(
         print("[VIEW] External preview window is enabled. Press 'q' in window to stop.")
 
     while len(ended_videos) < len(producers):
-        try:
-            item = frame_queue.get(timeout=1.0)
-        except queue.Empty:
-            if all(not t.is_alive() for t in producers):
-                break
-            continue
+        received_any = False
+        for i, q in enumerate(frame_queues):
+            video_id = f"video_{i + 1}"
+            if video_id in ended_videos:
+                continue
 
-        msg_type = item.get("type")
-        video_id = item.get("video_id", "unknown")
+            try:
+                item = q.get_nowait()
+            except queue.Empty:
+                continue
 
-        if msg_type == "eos":
-            ended_videos.add(video_id)
+            received_any = True
+            msg_type = item.get("type")
+
+            if msg_type == "eos":
+                ended_videos.add(video_id)
+                if video_id in video_progress:
+                    video_progress[video_id]["done"] = True
+                continue
+
+            if msg_type != "frame":
+                continue
+
+            frame = item.get("frame")
+            if frame is None:
+                continue
+
+            frame_index = int(item.get("frame_index", -1))
+            total_frames = int(item.get("video_total_frames", 0))
             if video_id in video_progress:
-                video_progress[video_id]["done"] = True
-            continue
+                video_progress[video_id]["last_frame"] = frame_index
+                if total_frames > 0:
+                    video_progress[video_id]["total_frames"] = total_frames
+                video_progress[video_id]["received_frames"] = int(video_progress[video_id]["received_frames"]) + 1
 
-        if msg_type != "frame":
-            continue
-
-        frame = item.get("frame")
-        if frame is None:
-            continue
-
-        frame_index = int(item.get("frame_index", -1))
-        total_frames = int(item.get("video_total_frames", 0))
-        if video_id in video_progress:
-            video_progress[video_id]["last_frame"] = frame_index
-            if total_frames > 0:
-                video_progress[video_id]["total_frames"] = total_frames
-            video_progress[video_id]["received_frames"] = int(video_progress[video_id]["received_frames"]) + 1
-
-        annotated = process_frame(
-            frame=frame,
-            video_id=video_id,
-            frame_index=frame_index,
-            args=args,
-            model_fire=model_fire,
-            model_weapon=model_weapon,
-            alerts_dir=alerts_dir,
-            frames_dir=frames_dir,
-            out_dir=out_dir,
-            event_counter=event_counter,
-        )
-
-        if args.show:
-            view = render_progress_ui(
-                frame=annotated,
-                title="Local Parallel Detection",
-                video_progress=video_progress,
+            annotated = process_frame(
+                frame=frame,
+                video_id=video_id,
+                frame_index=frame_index,
+                args=args,
+                model_fire=model_fire,
+                model_weapon=model_weapon,
+                alerts_dir=alerts_dir,
+                frames_dir=frames_dir,
+                out_dir=out_dir,
                 event_counter=event_counter,
             )
-            cv2.imshow("Parallel Video Detection (Local Fallback)", view)
-            if cv2.waitKey(1) & 0xFF == ord("q"):
+
+            if args.show:
+                view = render_progress_ui(
+                    frame=annotated,
+                    title="Local Parallel Detection",
+                    video_progress=video_progress,
+                    event_counter=event_counter,
+                )
+                cv2.imshow("Parallel Video Detection (Local Fallback)", view)
+                if cv2.waitKey(1) & 0xFF == ord("q"):
+                    ended_videos = {f"video_{idx + 1}" for idx in range(len(producers))}
+                    break
+
+        if not received_any:
+            if all(not t.is_alive() for t in producers):
                 break
+            time.sleep(0.01)
 
     for t in producers:
         t.join()
@@ -650,8 +667,10 @@ def run_local_pipeline(
 def main() -> None:
     args = parse_args()
 
-    if len(args.videos) < 2:
-        raise SystemExit("Please provide at least 2 videos in --videos for parallel processing.")
+    if len(args.videos) < 1:
+        raise SystemExit("Please provide at least 1 video in --videos.")
+    if args.transport in ("kafka", "auto") and len(args.videos) < 2:
+        raise SystemExit("Please provide at least 2 videos in --videos when using Kafka transport.")
 
     script_dir = Path(__file__).resolve().parent
     project_root = script_dir.parent if script_dir.name == "scripts" else script_dir
