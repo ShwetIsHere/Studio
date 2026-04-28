@@ -344,12 +344,7 @@ def process_frame(
         ok_enc_full, encoded_full = cv2.imencode(".jpg", annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
         if ok_enc_full:
             try:
-                import subprocess
-                subprocess.run(
-                    ["docker", "exec", "-i", "namenode", "hdfs", "dfs", "-put", "-f", "-", hdfs_image_path],
-                    input=encoded_full.tobytes(),
-                    check=True
-                )
+                hdfs_client.write(hdfs_image_path, data=encoded_full.tobytes(), overwrite=True)
                 final_image_path = f"hdfs://localhost:9000{hdfs_image_path}"
             except Exception as e:
                 print(f"Failed to upload image to HDFS: {e}")
@@ -371,14 +366,10 @@ def process_frame(
                 "source": "kafka_video_file" if args.transport in ("kafka", "auto") else "local_video_file",
             }
             
-            # Upload the JSON alert log to HDFS directly via Docker stdin
+            # Upload the JSON alert log to HDFS directly via WebHDFS (ultra fast)
             hdfs_log_path = f"/cctv/alerts/logs/{log_name}"
             try:
-                subprocess.run(
-                    ["docker", "exec", "-i", "namenode", "hdfs", "dfs", "-put", "-f", "-", hdfs_log_path],
-                    input=json.dumps(payload).encode("utf-8"),
-                    check=True
-                )
+                hdfs_client.write(hdfs_log_path, data=json.dumps(payload).encode("utf-8"), overwrite=True)
             except Exception as e:
                 print(f"Failed to upload JSON log to HDFS: {e}")
 

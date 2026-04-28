@@ -1,0 +1,4 @@
+v1
+{"path":"webhdfs://localhost:9870/cctv/alerts/logs/alert_video_3_1777395510465_489_weapon_a99cc0.json","timestamp":1777395510895,"batchId":206}
+{"path":"webhdfs://localhost:9870/cctv/alerts/logs/alert_video_2_1777395511085_492_fire_3c4209.json","timestamp":1777395511117,"batchId":206}
+{"path":"webhdfs://localhost:9870/cctv/alerts/logs/alert_video_3_1777395511191_492_weapon_513a63.json","timestamp":1777395512023,"batchId":206}

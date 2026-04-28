@@ -1,0 +1,12 @@
+v1
+{"path":"webhdfs://localhost:9870/cctv/alerts/logs/alert_video_2_1777395433060_306_weapon_237e1e.json","timestamp":1777395433088,"batchId":168}
+{"path":"webhdfs://localhost:9870/cctv/alerts/logs/alert_video_2_1777395433060_306_weapon_79e340.json","timestamp":1777395433500,"batchId":168}
+{"path":"webhdfs://localhost:9870/cctv/alerts/logs/alert_video_2_1777395433060_306_weapon_d5e836.json","timestamp":1777395433514,"batchId":168}
+{"path":"webhdfs://localhost:9870/cctv/alerts/logs/alert_video_2_1777395433060_306_weapon_675802.json","timestamp":1777395433927,"batchId":168}
+{"path":"webhdfs://localhost:9870/cctv/alerts/logs/alert_video_2_1777395433060_306_weapon_0c99e0.json","timestamp":1777395434341,"batchId":168}
+{"path":"webhdfs://localhost:9870/cctv/alerts/logs/alert_video_4_1777395434497_306_weapon_b01603.json","timestamp":1777395434534,"batchId":168}
+{"path":"webhdfs://localhost:9870/cctv/alerts/logs/alert_video_4_1777395434497_306_weapon_62f0cf.json","timestamp":1777395434548,"batchId":168}
+{"path":"webhdfs://localhost:9870/cctv/alerts/logs/alert_video_2_1777395434691_309_weapon_ad813a.json","timestamp":1777395434724,"batchId":168}
+{"path":"webhdfs://localhost:9870/cctv/alerts/logs/alert_video_2_1777395434691_309_weapon_5d6fcc.json","timestamp":1777395434736,"batchId":168}
+{"path":"webhdfs://localhost:9870/cctv/alerts/logs/alert_video_2_1777395434691_309_weapon_1ea0bb.json","timestamp":1777395434750,"batchId":168}
+{"path":"webhdfs://localhost:9870/cctv/alerts/logs/alert_video_2_1777395434691_309_weapon_806015.json","timestamp":1777395434759,"batchId":168}

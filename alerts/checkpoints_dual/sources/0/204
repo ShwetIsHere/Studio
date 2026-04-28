@@ -1,0 +1,3 @@
+v1
+{"path":"webhdfs://localhost:9870/cctv/alerts/logs/alert_video_4_1777395506331_474_weapon_71a0aa.json","timestamp":1777395506762,"batchId":204}
+{"path":"webhdfs://localhost:9870/cctv/alerts/logs/alert_video_3_1777395507199_480_weapon_edad17.json","timestamp":1777395507633,"batchId":204}
