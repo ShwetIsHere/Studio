@@ -10,7 +10,12 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import uuid
+from hdfs import InsecureClient
 from kafka import KafkaConsumer, KafkaProducer
+
+# Initialize HDFS WebHDFS Client
+hdfs_client = InsecureClient('http://localhost:9870', user='root')
 from kafka.admin import KafkaAdminClient, NewTopic
 from kafka.errors import (
     KafkaError,
@@ -333,23 +338,49 @@ def process_frame(
     if detections:
         ts = int(time.time() * 1000)
         frame_name = f"{video_id}_{ts}_{frame_index}.jpg"
-        frame_path = frames_dir / frame_name
-        # cv2.imwrite(str(frame_path), annotated)
+        
+        # Upload image directly to HDFS via Docker stdin
+        hdfs_image_path = f"/cctv/images/{frame_name}"
+        ok_enc_full, encoded_full = cv2.imencode(".jpg", annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+        if ok_enc_full:
+            try:
+                import subprocess
+                subprocess.run(
+                    ["docker", "exec", "-i", "namenode", "hdfs", "dfs", "-put", "-f", "-", hdfs_image_path],
+                    input=encoded_full.tobytes(),
+                    check=True
+                )
+                final_image_path = f"hdfs://localhost:9000{hdfs_image_path}"
+            except Exception as e:
+                print(f"Failed to upload image to HDFS: {e}")
+                # Fallback path if docker isn't running
+                final_image_path = f"hdfs://localhost:9000{hdfs_image_path}"
 
         for cls_name, conf in detections:
             event_counter[cls_name] = event_counter.get(cls_name, 0) + 1
-            log_name = f"alert_{video_id}_{ts}_{frame_index}_{cls_name}.json"
-            log_path = alerts_dir / log_name
+            # Add a random unique ID to prevent identical filenames for multiple threats in the same frame
+            unique_id = uuid.uuid4().hex[:6]
+            log_name = f"alert_{video_id}_{ts}_{frame_index}_{cls_name}_{unique_id}.json"
+            
             payload = {
                 "timestamp": ts,
                 "event_type": cls_name,
                 "confidence": round(conf, 3),
-                "image_path": str(frame_path.resolve()),
+                "image_path": final_image_path,
                 "camera_id": video_id,
                 "source": "kafka_video_file" if args.transport in ("kafka", "auto") else "local_video_file",
             }
-            # with open(log_path, "w", encoding="utf-8") as f:
-            #     json.dump(payload, f)
+            
+            # Upload the JSON alert log to HDFS directly via Docker stdin
+            hdfs_log_path = f"/cctv/alerts/logs/{log_name}"
+            try:
+                subprocess.run(
+                    ["docker", "exec", "-i", "namenode", "hdfs", "dfs", "-put", "-f", "-", hdfs_log_path],
+                    input=json.dumps(payload).encode("utf-8"),
+                    check=True
+                )
+            except Exception as e:
+                print(f"Failed to upload JSON log to HDFS: {e}")
 
     # Resize the image significantly to reduce base64 size for fast IPC and fast UI loading
     small_frame = cv2.resize(annotated, (480, 270))
