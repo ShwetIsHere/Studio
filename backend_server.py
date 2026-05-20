@@ -257,6 +257,21 @@ class BackendHandler(BaseHTTPRequestHandler):
         route = parsed.path
         query = parse_qs(parsed.query)
 
+        # Serve static HTML file from root or path
+        if route in ("/", "/mysql_dashboard.html"):
+            html_path = PROJECT_ROOT / "mysql_dashboard.html"
+            if html_path.exists():
+                try:
+                    data = html_path.read_bytes()
+                    self._write_binary(data, "text/html")
+                    return
+                except Exception as e:
+                    self._write_json({"success": False, "error": f"Failed to load html: {e}"}, 500)
+                    return
+            else:
+                self._write_json({"success": False, "error": "mysql_dashboard.html not found in project root."}, 404)
+                return
+
         if route == "/api/health":
             self._write_json({"success": True, "message": "Backend server is running"})
             return
@@ -264,6 +279,75 @@ class BackendHandler(BaseHTTPRequestHandler):
         if route == "/api/local-videos":
             videos = _iter_local_videos(limit=60)
             self._write_json({"success": True, "videos": videos, "count": len(videos)})
+            return
+
+        if route == "/api/mysql-alerts":
+            try:
+                import mysql.connector
+                conn = mysql.connector.connect(
+                    host="localhost",
+                    user="root",
+                    password="shwet",
+                    database="cctv"
+                )
+                cursor = conn.cursor(dictionary=True)
+                
+                # Resiliently check if table exists first
+                cursor.execute("SHOW TABLES LIKE 'threat_alerts'")
+                table_exists = cursor.fetchone()
+                if not table_exists:
+                    self._write_json({"success": True, "alerts": [], "count": 0})
+                    cursor.close()
+                    conn.close()
+                    return
+
+                cursor.execute("SELECT id, timestamp, event_type, confidence, camera_id, image_path FROM threat_alerts ORDER BY timestamp DESC")
+                rows = cursor.fetchall()
+                cursor.close()
+                conn.close()
+                self._write_json({"success": True, "alerts": rows, "count": len(rows)})
+            except Exception as e:
+                self._write_json({"success": False, "error": f"MySQL error: {str(e)}"}, 500)
+            return
+
+        if route == "/api/mysql-image":
+            path_param = query.get("path")
+            if not path_param or not path_param[0]:
+                self._write_json({"success": False, "error": "Missing 'path' query parameter."}, 400)
+                return
+
+            full_path = path_param[0]
+            hdfs_path = full_path
+            if hdfs_path.startswith("hdfs://"):
+                parsed_url = urlparse(hdfs_path)
+                hdfs_path = parsed_url.path
+
+            # Attempt HDFS, with graceful fallback to local frame candidates
+            try:
+                from hdfs import InsecureClient
+                client = InsecureClient('http://localhost:9870', user='root')
+                with client.read(hdfs_path) as reader:
+                    image_bytes = reader.read()
+                self._write_binary(image_bytes, "image/jpeg")
+            except Exception as e:
+                filename = os.path.basename(hdfs_path)
+                local_candidates = [
+                    FRAMES_DIR / filename,
+                    PROJECT_ROOT / "output" / "kafka_processed" / filename,
+                    PROJECT_ROOT / "alerts" / "frames" / filename
+                ]
+                found = False
+                for local_file in local_candidates:
+                    if local_file.exists():
+                        try:
+                            image_bytes = local_file.read_bytes()
+                            self._write_binary(image_bytes, "image/jpeg")
+                            found = True
+                            break
+                        except Exception:
+                            pass
+                if not found:
+                    self._write_json({"success": False, "error": f"Failed to retrieve image: {str(e)}"}, 500)
             return
 
         if route == "/api/run-status":

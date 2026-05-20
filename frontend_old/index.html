@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CCTV Sentinel — Threat Detection Dashboard</title>
+  <meta name="description" content="Real-time CCTV threat detection dashboard with Kafka parallel processing, HDFS image storage, and MySQL alert management." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/frontend/style.css" />
+</head>
+<body>
+
+  <!-- ═══════════════ NAVBAR ═══════════════ -->
+  <nav class="navbar" id="navbar">
+    <div class="navbar-inner">
+      <div class="logo">
+        <span class="logo-icon">🔥</span>
+        <span class="logo-text">CCTV <span class="logo-accent">Sentinel</span></span>
+      </div>
+      <div class="nav-tabs">
+        <button class="tab active" data-tab="detection" id="tab-detection">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+          Video Detection
+        </button>
+        <button class="tab" data-tab="gallery" id="tab-gallery">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+          Threat Gallery
+        </button>
+        <button class="tab" data-tab="logs" id="tab-logs">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+          System Logs
+        </button>
+      </div>
+      <div class="nav-status">
+        <span class="status-dot" id="backend-dot"></span>
+        <span class="status-label" id="backend-label">Backend</span>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ═══════════════ MAIN CONTENT ═══════════════ -->
+  <main class="container">
+
+    <!-- ──────────── TAB 1: VIDEO DETECTION ──────────── -->
+    <section id="detection-panel" class="tab-content active">
+      <div class="section-header">
+        <h1>Parallel Video Detection</h1>
+        <p class="subtitle">Upload multiple videos for real-time fire &amp; weapon detection via Kafka</p>
+      </div>
+
+      <!-- Upload Area -->
+      <div class="card upload-card" id="upload-card">
+        <div class="upload-area" id="upload-area">
+          <div class="upload-icon">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+          </div>
+          <p class="upload-title">Drop videos here or click to browse</p>
+          <p class="upload-hint">Minimum 2 videos for Kafka parallel processing • MP4, AVI, MOV, MKV</p>
+          <input type="file" id="file-input" multiple accept=".mp4,.avi,.mov,.mkv,.webm,.m4v" />
+        </div>
+        <div class="selected-files" id="selected-files" style="display:none;">
+          <div class="files-header">
+            <h3>Selected Videos</h3>
+            <button class="btn btn-ghost btn-sm" id="clear-files-btn">Clear All</button>
+          </div>
+          <ul class="file-list" id="file-list"></ul>
+        </div>
+      </div>
+
+      <!-- Controls -->
+      <div class="controls-row">
+        <div class="control-group">
+          <div class="card control-card">
+            <h3>Spark Streaming</h3>
+            <p class="control-hint">Must be running before detection to persist alerts to MySQL &amp; MongoDB</p>
+            <div class="btn-group">
+              <button class="btn btn-success" id="start-spark-btn">
+                <span class="btn-dot" id="spark-dot"></span>
+                Start Spark
+              </button>
+              <button class="btn btn-danger" id="stop-spark-btn" disabled>Stop</button>
+            </div>
+            <div class="status-badge" id="spark-status-badge">
+              <span class="status-dot offline"></span> Stopped
+            </div>
+          </div>
+          <div class="card control-card">
+            <h3>Kafka Detection</h3>
+            <p class="control-hint">Starts YOLO fire &amp; weapon detection on uploaded videos</p>
+            <button class="btn btn-primary btn-lg" id="start-detection-btn" disabled>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+              Start Detection
+            </button>
+            <div class="status-badge" id="detect-status-badge">
+              <span class="status-dot offline"></span> Idle
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Detection Progress -->
+      <div class="card progress-card" id="progress-card" style="display:none;">
+        <h3>Detection Progress</h3>
+        <div class="progress-info">
+          <div class="progress-stat">
+            <span class="stat-label">Videos</span>
+            <span class="stat-value" id="progress-videos">0</span>
+          </div>
+          <div class="progress-stat">
+            <span class="stat-label">Status</span>
+            <span class="stat-value" id="progress-status">—</span>
+          </div>
+          <div class="progress-stat">
+            <span class="stat-label">Exit Code</span>
+            <span class="stat-value" id="progress-exit">—</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ──────────── TAB 2: THREAT GALLERY ──────────── -->
+    <section id="gallery-panel" class="tab-content">
+      <div class="section-header">
+        <h1>Threat Alerts Gallery</h1>
+        <p class="subtitle">Detection alerts from MySQL with images served from Hadoop HDFS</p>
+      </div>
+
+      <!-- Gallery Controls -->
+      <div class="gallery-controls">
+        <div class="filter-group">
+          <button class="filter-btn active" data-filter="all" id="filter-all">All</button>
+          <button class="filter-btn" data-filter="fire" id="filter-fire">🔥 Fire</button>
+          <button class="filter-btn" data-filter="weapon" id="filter-weapon">🔫 Weapon</button>
+        </div>
+        <div class="gallery-actions">
+          <span class="alert-count" id="alert-count">0 alerts</span>
+          <button class="btn btn-outline" id="refresh-alerts-btn">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      <!-- Alert Cards Grid -->
+      <div class="gallery-grid" id="gallery-grid">
+        <div class="gallery-empty" id="gallery-empty">
+          <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+          <p>No threat alerts found</p>
+          <p class="hint">Run a detection job first, then refresh to see alerts</p>
+        </div>
+      </div>
+
+      <!-- Pagination -->
+      <div class="pagination" id="pagination" style="display:none;">
+        <button class="btn btn-ghost" id="prev-page-btn" disabled>← Previous</button>
+        <span class="page-info" id="page-info">Page 1</span>
+        <button class="btn btn-ghost" id="next-page-btn">Next →</button>
+      </div>
+    </section>
+
+    <!-- ──────────── TAB 3: SYSTEM LOGS ──────────── -->
+    <section id="logs-panel" class="tab-content">
+      <div class="section-header">
+        <h1>System Logs</h1>
+        <p class="subtitle">Real-time output from detection and Spark streaming processes</p>
+      </div>
+
+      <div class="logs-grid">
+        <!-- Detection Logs -->
+        <div class="card log-card">
+          <div class="log-header">
+            <div class="log-title">
+              <span class="log-dot" id="detect-log-dot"></span>
+              <h3>kafka_parallel_video_detection.py</h3>
+            </div>
+            <button class="btn btn-ghost btn-sm" id="clear-detect-logs">Clear</button>
+          </div>
+          <div class="log-terminal" id="detect-log-output">
+            <p class="log-placeholder">Waiting for detection process to start...</p>
+          </div>
+        </div>
+
+        <!-- Spark Logs -->
+        <div class="card log-card">
+          <div class="log-header">
+            <div class="log-title">
+              <span class="log-dot" id="spark-log-dot"></span>
+              <h3>hadoop_spark_dual_streaming.py</h3>
+            </div>
+            <button class="btn btn-ghost btn-sm" id="clear-spark-logs">Clear</button>
+          </div>
+          <div class="log-terminal" id="spark-log-output">
+            <p class="log-placeholder">Waiting for Spark streaming to start...</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ═══════════════ LIGHTBOX MODAL ═══════════════ -->
+  <div class="modal-overlay" id="lightbox-overlay" style="display:none;">
+    <div class="modal-content" id="lightbox-content">
+      <button class="modal-close" id="lightbox-close">&times;</button>
+      <img class="modal-image" id="lightbox-image" src="" alt="Detection Image" />
+      <div class="modal-info" id="lightbox-info"></div>
+    </div>
+  </div>
+
+  <script src="/frontend/app.js"></script>
+</body>
+</html>
