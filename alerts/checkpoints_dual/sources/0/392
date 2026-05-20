@@ -1,0 +1,16 @@
+v1
+{"path":"webhdfs://localhost:9870/cctv/alerts/logs/alert_video_1_1779264168203_33_weapon_ba73b5.json","timestamp":1779264168637,"batchId":392}
+{"path":"webhdfs://localhost:9870/cctv/alerts/logs/alert_video_2_1779264168700_36_weapon_cf0684.json","timestamp":1779264169133,"batchId":392}
+{"path":"webhdfs://localhost:9870/cctv/alerts/logs/alert_video_2_1779264168700_36_weapon_1d7ad9.json","timestamp":1779264169549,"batchId":392}
+{"path":"webhdfs://localhost:9870/cctv/alerts/logs/alert_video_2_1779264168700_36_weapon_ac6320.json","timestamp":1779264169964,"batchId":392}
+{"path":"webhdfs://localhost:9870/cctv/alerts/logs/alert_video_2_1779264168700_36_weapon_d0c8ec.json","timestamp":1779264170378,"batchId":392}
+{"path":"webhdfs://localhost:9870/cctv/alerts/logs/alert_video_2_1779264168700_36_weapon_a3e5b8.json","timestamp":1779264170793,"batchId":392}
+{"path":"webhdfs://localhost:9870/cctv/alerts/logs/alert_video_2_1779264168700_36_weapon_e98f5b.json","timestamp":1779264171219,"batchId":392}
+{"path":"webhdfs://localhost:9870/cctv/alerts/logs/alert_video_2_1779264168700_36_weapon_f88d31.json","timestamp":1779264171245,"batchId":392}
+{"path":"webhdfs://localhost:9870/cctv/alerts/logs/alert_video_2_1779264171649_39_weapon_50e0d0.json","timestamp":1779264172090,"batchId":392}
+{"path":"webhdfs://localhost:9870/cctv/alerts/logs/alert_video_2_1779264171649_39_weapon_651b45.json","timestamp":1779264172508,"batchId":392}
+{"path":"webhdfs://localhost:9870/cctv/alerts/logs/alert_video_2_1779264171649_39_weapon_2f2775.json","timestamp":1779264172528,"batchId":392}
+{"path":"webhdfs://localhost:9870/cctv/alerts/logs/alert_video_2_1779264171649_39_weapon_2d2ff4.json","timestamp":1779264172951,"batchId":392}
+{"path":"webhdfs://localhost:9870/cctv/alerts/logs/alert_video_2_1779264171649_39_weapon_520e2b.json","timestamp":1779264173375,"batchId":392}
+{"path":"webhdfs://localhost:9870/cctv/alerts/logs/alert_video_2_1779264171649_39_weapon_82c1fd.json","timestamp":1779264173813,"batchId":392}
+{"path":"webhdfs://localhost:9870/cctv/alerts/logs/alert_video_2_1779264171649_39_weapon_a5e680.json","timestamp":1779264173826,"batchId":392}

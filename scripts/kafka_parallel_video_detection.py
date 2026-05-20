@@ -7,6 +7,7 @@ import socket
 import threading
 import time
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 
 import cv2
 import numpy as np
@@ -16,6 +17,16 @@ from kafka import KafkaConsumer, KafkaProducer
 
 # Initialize HDFS WebHDFS Client
 hdfs_client = InsecureClient('http://localhost:9870', user='root')
+
+# Background ThreadPoolExecutor for high-performance HDFS writes
+upload_executor = ThreadPoolExecutor(max_workers=12)
+
+def _bg_hdfs_write(hdfs_path: str, data: bytes) -> None:
+    try:
+        hdfs_client.write(hdfs_path, data=data, overwrite=True)
+    except Exception as e:
+        print(f"Failed to upload to HDFS in background: {e}", flush=True)
+
 from kafka.admin import KafkaAdminClient, NewTopic
 from kafka.errors import (
     KafkaError,
@@ -339,17 +350,12 @@ def process_frame(
         ts = int(time.time() * 1000)
         frame_name = f"{video_id}_{ts}_{frame_index}.jpg"
         
-        # Upload image directly to HDFS via Docker stdin
+        # Upload image directly to HDFS asynchronously in background
         hdfs_image_path = f"/cctv/images/{frame_name}"
+        final_image_path = f"hdfs://localhost:9000{hdfs_image_path}"
         ok_enc_full, encoded_full = cv2.imencode(".jpg", annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
         if ok_enc_full:
-            try:
-                hdfs_client.write(hdfs_image_path, data=encoded_full.tobytes(), overwrite=True)
-                final_image_path = f"hdfs://localhost:9000{hdfs_image_path}"
-            except Exception as e:
-                print(f"Failed to upload image to HDFS: {e}")
-                # Fallback path if docker isn't running
-                final_image_path = f"hdfs://localhost:9000{hdfs_image_path}"
+            upload_executor.submit(_bg_hdfs_write, hdfs_image_path, encoded_full.tobytes())
 
         for cls_name, conf in detections:
             event_counter[cls_name] = event_counter.get(cls_name, 0) + 1
@@ -366,12 +372,10 @@ def process_frame(
                 "source": "kafka_video_file" if args.transport in ("kafka", "auto") else "local_video_file",
             }
             
-            # Upload the JSON alert log to HDFS directly via WebHDFS (ultra fast)
+            # Upload the JSON alert log to HDFS asynchronously in background
             hdfs_log_path = f"/cctv/alerts/logs/{log_name}"
-            try:
-                hdfs_client.write(hdfs_log_path, data=json.dumps(payload).encode("utf-8"), overwrite=True)
-            except Exception as e:
-                print(f"Failed to upload JSON log to HDFS: {e}")
+            payload_bytes = json.dumps(payload).encode("utf-8")
+            upload_executor.submit(_bg_hdfs_write, hdfs_log_path, payload_bytes)
 
     # Resize the image significantly to reduce base64 size for fast IPC and fast UI loading
     small_frame = cv2.resize(annotated, (480, 270))
@@ -717,24 +721,8 @@ def main() -> None:
     print(f"Loading weapon model: {weapon_model_path}")
     model_weapon = YOLO(str(weapon_model_path))
 
-    if args.transport == "local":
-        run_local_pipeline(
-            args=args,
-            model_fire=model_fire,
-            model_weapon=model_weapon,
-            alerts_dir=alerts_dir,
-            frames_dir=frames_dir,
-            out_dir=out_dir,
-        )
-        print("Processing complete.")
-        return
-
-    if args.transport in ("auto", "kafka"):
-        assert_kafka_reachable(args.bootstrap_servers)
-        topic_ready = ensure_topic_ready(args.bootstrap_servers, args.topic)
-
-        if not topic_ready and args.transport == "auto":
-            print("[FALLBACK] Kafka metadata not ready. Switching to local queue mode.")
+    try:
+        if args.transport == "local":
             run_local_pipeline(
                 args=args,
                 model_fire=model_fire,
@@ -746,61 +734,81 @@ def main() -> None:
             print("Processing complete.")
             return
 
-        try:
-            producer = KafkaProducer(
-                bootstrap_servers=args.bootstrap_servers,
-                value_serializer=lambda v: json.dumps(v).encode("utf-8"),
-                linger_ms=10,
-                request_timeout_ms=20000,
-                api_version_auto_timeout_ms=10000,
-            )
-        except NoBrokersAvailable as exc:
-            if args.transport == "kafka":
-                raise SystemExit(
-                    "Kafka producer could not connect to any broker. "
-                    f"Check --bootstrap-servers ({args.bootstrap_servers}) and ensure Kafka is running."
-                ) from exc
+        if args.transport in ("auto", "kafka"):
+            assert_kafka_reachable(args.bootstrap_servers)
+            topic_ready = ensure_topic_ready(args.bootstrap_servers, args.topic)
 
-            print("[FALLBACK] Kafka producer unavailable. Switching to local queue mode.")
-            run_local_pipeline(
+            if not topic_ready and args.transport == "auto":
+                print("[FALLBACK] Kafka metadata not ready. Switching to local queue mode.")
+                run_local_pipeline(
+                    args=args,
+                    model_fire=model_fire,
+                    model_weapon=model_weapon,
+                    alerts_dir=alerts_dir,
+                    frames_dir=frames_dir,
+                    out_dir=out_dir,
+                )
+                print("Processing complete.")
+                return
+
+            try:
+                producer = KafkaProducer(
+                    bootstrap_servers=args.bootstrap_servers,
+                    value_serializer=lambda v: json.dumps(v).encode("utf-8"),
+                    linger_ms=10,
+                    request_timeout_ms=20000,
+                    api_version_auto_timeout_ms=10000,
+                )
+            except NoBrokersAvailable as exc:
+                if args.transport == "kafka":
+                    raise SystemExit(
+                        "Kafka producer could not connect to any broker. "
+                        f"Check --bootstrap-servers ({args.bootstrap_servers}) and ensure Kafka is running."
+                    ) from exc
+
+                print("[FALLBACK] Kafka producer unavailable. Switching to local queue mode.")
+                run_local_pipeline(
+                    args=args,
+                    model_fire=model_fire,
+                    model_weapon=model_weapon,
+                    alerts_dir=alerts_dir,
+                    frames_dir=frames_dir,
+                    out_dir=out_dir,
+                )
+                print("Processing complete.")
+                return
+
+            producer_threads = []
+            for i, video_path in enumerate(args.videos, start=1):
+                video_id = f"video_{i}"
+                t = threading.Thread(
+                    target=producer_worker,
+                    args=(producer, video_path, video_id, args.topic, args.frame_step),
+                    daemon=True,
+                )
+                producer_threads.append(t)
+                t.start()
+
+            run_consumer(
                 args=args,
                 model_fire=model_fire,
                 model_weapon=model_weapon,
                 alerts_dir=alerts_dir,
                 frames_dir=frames_dir,
                 out_dir=out_dir,
+                producer_count=len(producer_threads),
+                producer_threads=producer_threads,
             )
+
+            for t in producer_threads:
+                t.join()
+
+            producer.close()
             print("Processing complete.")
             return
-
-        producer_threads = []
-        for i, video_path in enumerate(args.videos, start=1):
-            video_id = f"video_{i}"
-            t = threading.Thread(
-                target=producer_worker,
-                args=(producer, video_path, video_id, args.topic, args.frame_step),
-                daemon=True,
-            )
-            producer_threads.append(t)
-            t.start()
-
-        run_consumer(
-            args=args,
-            model_fire=model_fire,
-            model_weapon=model_weapon,
-            alerts_dir=alerts_dir,
-            frames_dir=frames_dir,
-            out_dir=out_dir,
-            producer_count=len(producer_threads),
-            producer_threads=producer_threads,
-        )
-
-        for t in producer_threads:
-            t.join()
-
-        producer.close()
-        print("Processing complete.")
-        return
+    finally:
+        print("[SHUTDOWN] Waiting for background HDFS uploads to complete...", flush=True)
+        upload_executor.shutdown(wait=True)
 
 
 if __name__ == "__main__":

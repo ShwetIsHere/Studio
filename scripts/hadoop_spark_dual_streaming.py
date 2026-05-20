@@ -1,5 +1,6 @@
 import os
 import sys
+import threading
 from pathlib import Path
 
 # --- JDK & HADOOP ENVIRONMENT SETUP ---
@@ -46,7 +47,7 @@ MONGO_COLLECTION = "threat_alerts"
 # MySQL
 MYSQL_USER = "root"
 MYSQL_PASSWORD = "shwet"  # Replace with actual
-MYSQL_DB_URL = "jdbc:mysql://localhost:3306/cctv"
+MYSQL_DB_URL = "jdbc:mysql://localhost:3306/cctv?rewriteBatchedStatements=true"
 MYSQL_TABLE = "threat_alerts"
 
 # --- HDFS CONFIGURATION ---
@@ -91,39 +92,53 @@ def write_dual_output(batch_df, batch_id):
     Writes the filtered micro-batch DataFrame to BOTH MongoDB and MySQL.
     Matches the 'Dual Output' architecture diagram.
     """
-    count = batch_df.count()
-    if count > 0:
-        print(f"PROCESSED THREAT: Batch ID {batch_id} | Saving {count} alerts to MongoDB and MySQL...")
-        
-        # Write to MongoDB (Semi-Structured)
-        try:
-            batch_df.write \
-                .format("mongodb") \
-                .option("connection.uri", MONGO_URI) \
-                .option("database", MONGO_DB) \
-                .option("collection", MONGO_COLLECTION) \
-                .mode("append") \
-                .save()
-            print(" -> Successfully saved to MongoDB")
-        except Exception as e:
-            print(f" -> Error writing to MongoDB: {e}")
-        
-        # Write to MySQL (Structured)
-        try:
-            batch_df.write \
-                .format("jdbc") \
-                .option("url", MYSQL_DB_URL) \
-                .option("driver", "com.mysql.cj.jdbc.Driver") \
-                .option("dbtable", MYSQL_TABLE) \
-                .option("user", MYSQL_USER) \
-                .option("password", MYSQL_PASSWORD) \
-                .mode("append") \
-                .save()
-            print(" -> Successfully saved to MySQL")
-        except Exception as e:
-            print(f" -> Error writing to MySQL: {e}")
-    else:
-        pass
+    batch_df.persist()
+    try:
+        count = batch_df.count()
+        if count > 0:
+            print(f"PROCESSED THREAT: Batch ID {batch_id} | Saving {count} alerts to MongoDB and MySQL...")
+            
+            # Define target functions for parallel execution
+            def write_mongodb():
+                try:
+                    batch_df.write \
+                        .format("mongodb") \
+                        .option("connection.uri", MONGO_URI) \
+                        .option("database", MONGO_DB) \
+                        .option("collection", MONGO_COLLECTION) \
+                        .mode("append") \
+                        .save()
+                    print(" -> Successfully saved to MongoDB")
+                except Exception as e:
+                    print(f" -> Error writing to MongoDB: {e}")
+
+            def write_mysql():
+                try:
+                    batch_df.write \
+                        .format("jdbc") \
+                        .option("url", MYSQL_DB_URL) \
+                        .option("driver", "com.mysql.cj.jdbc.Driver") \
+                        .option("dbtable", MYSQL_TABLE) \
+                        .option("user", MYSQL_USER) \
+                        .option("password", MYSQL_PASSWORD) \
+                        .option("batchsize", "10000") \
+                        .mode("append") \
+                        .save()
+                    print(" -> Successfully saved to MySQL")
+                except Exception as e:
+                    print(f" -> Error writing to MySQL: {e}")
+
+            # Execute database writes in parallel
+            t_mongo = threading.Thread(target=write_mongodb)
+            t_mysql = threading.Thread(target=write_mysql)
+            t_mongo.start()
+            t_mysql.start()
+            t_mongo.join()
+            t_mysql.join()
+        else:
+            pass
+    finally:
+        batch_df.unpersist()
 
 # 6. Start the Streaming Query
 query = filtered_alerts_df.writeStream \
